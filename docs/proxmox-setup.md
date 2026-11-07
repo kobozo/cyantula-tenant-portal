@@ -1,56 +1,91 @@
 # Proxmox Setup Instructions
 
-## Infrastructure
+## Architecture
 
 ```
-Proxmox Host: 192.168.1.240 (VLAN 30)
-Network: 192.168.30.0/24
-Gateway: 192.168.30.1
-DNS: 192.168.1.53
+Existing Production Server: 192.168.1.240 (NO CHANGES - data safe)
+   │
+   └── VLAN 30 interface → New Proxmox Server (192.168.30.x)
+          │
+          ├── LXC 100: cyantula-tenant-portal (192.168.30.100)
+          │    ├── Tenant Portal API
+          │    ├── Provisioning engine
+          │    ├── CI/CD runner (templates, release)
+          │    └── Auto-update for tenant apps
+          │
+          └── LXC 101-199: Tenant Cyantula instances
+               └── Per tenant Cyantula app
 ```
 
-## Architectuur
+## What NOT to Do
+
+⚠️ **DO NOT** touch the existing server at 192.168.1.240
+- Production data stays intact
+- No reinstallation
+- No changes to existing services
+
+## New Setup
+
+### 1. Separate Proxmox Server
+
+Set up a **NEW** Proxmox server on VLAN 30 (different machine or separate VLAN interface).
+
+**Network (VLAN 30):**
+- Proxmox: 192.168.30.100
+- Network: 192.168.30.0/24
+- Gateway: 192.168.30.1
+- DNS: 192.168.1.53
+
+### 2. cyantula-tenant-portal
+
+The app we're building will run in an LXC container on this new Proxmox:
+
+**LXC 100:**
+- IP: 192.168.30.100
+- CPU: 4 vCPUs
+- RAM: 8 GB
+- Disk: 50 GB SSD
+
+**Functies:**
+- Tenant Portal API
+- Provisioning engine (creates LXC for tenants)
+- Template generator (CI/CD)
+- Release management
+- Auto-update tenant apps
+
+### 3. Communication Flow
 
 ```
 Internet
    │
    ▼
-VLAN 30 (192.168.30.0/24)
+192.168.1.240 (production - unchanged)
    │
-   ├─── 192.168.30.100 (LXC 100: cyantula-portal)
-   │    ├── Tenant Portal API
-   │    ├── Provisioning engine
-   │    ├── Template generator (via CI)
-   │    ├── Release management
-   │    └── Auto-update voor tenant apps
-   │
-   ├─── 192.168.30.101-199 (LXC: tenant instances)
-   │    └── Cyantula per tenant
-   │
-   └─── 192.168.30.200 (LXC: cyantula-app)
-        ├── Template generator
-        ├── Release builder (CI)
-        └── Package publisher
+   └── VLAN 30 → 192.168.30.100 (cyantula-tenant-portal)
+          │
+          ├── API: Create organisation → LXC provisioning
+          ├── Provisioning: Create LXC → tenant instance
+          └── CI/CD: Build templates → publish updates
 ```
 
-## Proxmox Installatie
+## VLAN 30 Configuration
 
-### 1. Installatie
+### On the existing server (192.168.1.240)
 
-Install Proxmox VE op 192.168.1.240 met VLAN 30 support.
-
-### 2. Netwerk Configuratie
-
-Bewerk `/etc/network/interfaces`:
+Add VLAN 30 interface for communication to new Proxmox:
 
 ```bash
-auto lo
-iface lo inet loopback
+# /etc/network/interfaces (on 192.168.1.240)
+auto eth0.30
+iface eth0.30 inet static
+    address 192.168.1.240  # unchanged - existing IP
+    # VLAN 30 bridge for new Proxmox
+```
 
-auto eth0
-iface eth0 inet manual
+### On the new Proxmox server
 
-# VLAN 30
+```bash
+# /etc/network/interfaces (on new Proxmox)
 auto eth0.30
 iface eth0.30 inet static
     address 192.168.30.100
@@ -58,7 +93,6 @@ iface eth0.30 inet static
     gateway 192.168.30.1
     vlan-raw-device eth0
 
-# Bridge voor LXC/VMs
 auto vmbr0
 iface vmbr0 inet static
     address 192.168.30.100
@@ -68,74 +102,25 @@ iface vmbr0 inet static
     bridge_fd 0
 ```
 
-### 3. Proxmox Updaten
+## What I Should Create
 
-```bash
-echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve-install-repo.list
-wget -O- https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
-apt update && apt full-upgrade -y
-```
-
-### 4. DNS
-
-```bash
-nameserver 192.168.1.53
-search cyantula.eu
-```
-
-## LXC Containers
-
-### Cyantula Portal (LXC 100)
-
-Deze LXC draait de tenant portal en de CI/CD pipeline.
-
-**Hardware:**
-- CPU: 4 vCPUs
-- RAM: 8 GB
-- Disk: 50 GB SSD
-
-**Network:**
-- IP: 192.168.30.100/24
-- Gateway: 192.168.30.1
-
-**Functies:**
-- Tenant Portal API (FastAPI)
-- Provisioning engine
-- Template generator (via CI)
+**In cyantula-tenant-portal repo:**
+- API endpoints for tenant onboarding
+- Provisioning logic (Proxmox API client)
+- Template generation scripts
 - Release management
-- Auto-update tenant apps
+- Auto-update mechanism
 
-### Tenant LXC Containers (LXC 101-199)
+**What CI does:**
+- Build packages
+- Publish templates
+- Update tenant instances
 
-Elke tenant krijgt een eigen LXC container.
+## Summary
 
-**Hardware per tenant:**
-- CPU: 2 vCPUs
-- RAM: 4 GB
-- Disk: 20 GB SSD
-
-**Network:**
-- Elke tenant heeft eigen IP in 192.168.30.x/24 subnet
-- Volledige isolatie tussen tenants
-
-**Functies:**
-- Cyantula app per tenant
-- Auto-update via portal
-- Gedeclareerd bij template update
-
-## CI/CD Pipeline
-
-De cyantula-app in LXC doet:
-
-1. **Template Generator**: Genereert LXC templates voor tenants
-2. **Release Builder**: Buildt nieuwe Cyantula versies
-3. **Package Publisher**: Publiceert packages voor auto-update
-
-## Volgende Stappen
-
-Na Proxmox installatie:
-1. LXC 100 aanmaken voor cyantula-portal
-2. Cyantula app installeren in LXC 100
-3. CI/CD pipeline configureren
-4. Template generator opstarten
-5. Tenant onboarding flow testen
+| Component | Location | Action |
+|-----------|----------|--------|
+| Existing server | 192.168.1.240 | **NO CHANGES** |
+| New Proxmox | New machine/VLAN 30 | Install Proxmox |
+| cyantula-tenant-portal | LXC on new Proxmox | Build app + code |
+| Tenant LXCs | On new Proxmox | Created by portal |
