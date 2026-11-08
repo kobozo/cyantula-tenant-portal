@@ -1,46 +1,55 @@
 # Custom Domain Routing Design
 
+## Architecture Overview
+
+Cyantula has **two types of portals**:
+
+### 1. Main Portal (Shared)
+- URL: `portal.cyantula.eu`
+- Purpose: Shared admin/user interface for ALL tenants
+- Sign-in, app management, dashboard (shared across platform)
+
+### 2. Tenant Apps (Per Tenant)
+- Each tenant can have multiple apps
+- Apps accessed via: `<<appname>>.<<tenantdomain>>.be`
+- Custom domains point to specific apps
+
 ## Scenario
 
-Customer has domain: `sintrembert.be`
+Customer domain: `sintrembert.be`
 
-Apps are accessed via: `<<appname>>.sintrembert.be`
+Tenant wants:
+- Portal app: `portal.sintrembert.be` (their main branded entry point)
+- Analytics app: `analytics.sintrembert.be`
+- CRM app: `crm.sintrembert.be`
 
-Examples:
-- `portal.sintrembert.be`
-- `analytics.sintrembert.be`
-- `dashboard.sintrembert.be`
+## DNS Setup
 
-## Existing Cyantula Pattern
-
-Cyantula already supports this pattern:
+**Option 1: Per-app CNAME (Current Cyantula pattern)**
 
 ```
-1. Customer creates wildcard CNAME:
-   *.sintrembert.be  CNAME  → cyantula.eu (or portal.cyantula.eu)
+Customer DNS:
+portal.be       CNAME    → portal.sintrembert.cyantula.eu
+analytics.be    CNAME    → analytics.sintrembert.cyantula.eu
+crm.be          CNAME    → crm.sintrembert.cyantula.eu
 
-2. Cyantula checks CNAME for <<appname>>.sintrembert.be
-
-3. Certificate automation:
-   - Cloudflare: API-based wildcard certificate
-   - Caddy: Let's Encrypt on-demand
-
-4. Session forwarding via /__spin/claim for cookies
+Proxmox DNS:
+portal.sintrembert.cyantula.eu       A    → Tunnel
+analytics.sintrembert.cyantula.eu    A    → Tunnel
+crm.sintrembert.cyantula.eu          A    → Tunnel
 ```
 
-## Tenant Portal Implementation
-
-### DNS Setup
+**Option 2: Base Domain Wildcard**
 
 ```
-Customer DNS (at any DNS host):
-*.sintrembert.be    CNAME    → tenant-a.cyantula.eu
+Customer DNS:
+*.sintrembert.be    CNAME    → sintrembert.cyantula.eu
 
-Cloudflare Tunnel DNS:
-tenant-a.cyantula.eu    A    → Tunnel
+Proxmox DNS:
+sintrembert.cyantula.eu    A    → Tunnel
 ```
 
-### Architecture
+## Architecture
 
 ```
 Internet
@@ -48,20 +57,40 @@ Internet
    ▼
 Cloudflare Tunnel (cloudflared on Proxmox)
    │
-   ├── portal.cyantula.eu → Portal API
+   ├── portal.cyantula.eu → Main Portal UI (shared)
    │
    └── *.cyantula.eu → Reverse Proxy
        │
        └── Routes to tenant LXCs based on Host header
-           ├── portal.sintrembert.be → 192.168.30.10:443 (Tenant A)
-           ├── analytics.sintrembert.be → 192.168.30.10:443 (Tenant A)
-           ├── app1.sintrembert.be → 192.168.30.10:443 (Tenant A)
-           └── tenant-b.cyantula.eu → 192.168.30.20:443 (Tenant B)
+           ├── portal.be → 192.168.30.10:443 (Tenant A, "portal" app)
+           ├── portal.sintrembert.be → 192.168.30.10:443 (Tenant A, "portal" app)
+           ├── analytics.be → 192.168.30.10:443 (Tenant A, "analytics" app)
+           ├── analytics.sintrembert.be → 192.168.30.10:443 (Tenant A, "analytics" app)
+           └── *.cyantula.eu → Tenant routing
 ```
 
-### Reverse Proxy Logic
+## How It Works
 
-NGINX config:
+### Custom Domain per App
+
+```
+1. Tenant creates app named "portal"
+2. Tenant adds custom domain: portal.be
+3. System creates: portal.be → portal.sintrembert.cyantula.eu
+4. Customer adds DNS: portal.be CNAME portal.sintrembert.cyantula.eu
+5. Traffic: portal.be → Tenant A's "portal" app
+```
+
+### Base Domain Wildcard
+
+```
+1. Tenant registers sintrembert.be as base domain
+2. System creates: *.sintrembert.be → sintrembert.cyantula.eu
+3. Customer adds DNS: *.sintrembert.be CNAME sintrembert.cyantula.eu
+4. All subdomains route to tenant (app selection via path or subdomain routing)
+```
+
+## Reverse Proxy Logic
 
 ```nginx
 # Reverse proxy on port 8080
@@ -76,37 +105,47 @@ upstream tenant_b {
 server {
     listen 8080;
     
-    # Extract tenant from Host header
-    # portal.sintrembert.be → tenant_a
-    # analytics.sintrembert.be → tenant_a
-    # app1.sintrembert.be → tenant_a
-    set $tenant_slug $host;
+    # Extract app/tenant from host
+    set $tenant_slug "";
+    set $app_slug "";
     
-    # Remove .sintrembert.be to get tenant identifier
+    # Pattern 1: <<app>>.be (custom domain per app)
+    if ($host ~* ^(.+)\.be$) {
+        set $app_slug $1;
+        set $tenant_slug $1;  # Same as app for this pattern
+    }
+    
+    # Pattern 2: <<app>>.sintrembert.be (custom subdomain)
     if ($host ~* ^(.+)\.sintrembert\.be$) {
+        set $app_slug $1;
+        set $tenant_slug "sintrembert";  # Base domain tenant
+    }
+    
+    # Pattern 3: <<tenant>>.cyantula.eu (default)
+    if ($host ~* ^(.+)\.cyantula\.eu$) {
         set $tenant_slug $1;
     }
     
-    # Map tenant slug to IP
-    location @tenant_route {
+    # Route to tenant
+    location @route_tenant {
+        # Database lookup: SELECT ip FROM tenants WHERE slug = $tenant_slug
         proxy_pass https://$tenant_ip;
         proxy_set_header Host $host;
-    }
-    
-    location / {
-        proxy_pass http://127.0.0.1:8000;
     }
 }
 ```
 
-### Portal Database
+## Database Schema
 
 ```sql
 CREATE TABLE tenant_custom_domains (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES tenants(id),
-    base_domain VARCHAR(255) NOT NULL,  -- sintrembert.be
-    wildcard_verified BOOLEAN DEFAULT FALSE,
+    hostname VARCHAR(255) UNIQUE NOT NULL,
+    app_slug VARCHAR(255),  # For per-app domains like <<app>>.be
+    base_domain VARCHAR(255),  # For base domains like sintrembert.be
+    is_base_domain BOOLEAN DEFAULT FALSE,
+    verified BOOLEAN DEFAULT FALSE,
     verified_at TIMESTAMPTZ,
     cert_status VARCHAR(50),
     cf_hostname_id VARCHAR(100),
@@ -116,85 +155,63 @@ CREATE TABLE tenant_custom_domains (
 CREATE INDEX idx_tenant_custom_domain_base ON tenant_custom_domains(base_domain);
 ```
 
-### Portal API
+## Portal API
 
 ```python
 # /api/tenants/:id/custom-domains
-POST   # Add custom domain (base domain)
+POST   # Add custom domain
 GET    # List custom domains
 DELETE # Remove custom domain
 POST   # Check CNAME verification
 
-# Instructions for customer:
+# For per-app domain:
 {
-  "hostname": "*.sintrembert.be",
+  "hostname": "portal.be",
   "type": "CNAME",
-  "target": "tenant-a.cyantula.eu",
-  "record": "*.sintrembert.be  CNAME  tenant-a.cyantula.eu"
+  "target": "portal.sintrembert.cyantula.eu",
+  "record": "portal.be  CNAME  portal.sintrembert.cyantula.eu"
+}
+
+# For base domain:
+{
+  "hostname": "sintrembert.be",
+  "type": "CNAME",
+  "target": "sintrembert.cyantula.eu",
+  "is_base_domain": true,
+  "record": "*.sintrembert.be  CNAME  sintrembert.cyantula.eu"
 }
 ```
 
-## How It Works
+## Routing Examples
 
-1. **Customer registers domain**: `sintrembert.be` in portal
-2. **Portal creates wildcard CNAME**: `*.sintrembert.be` → `tenant-a.cyantula.eu`
-3. **Customer adds DNS**: `*.sintrembert.be` CNAME record
-4. **Portal verifies**: CNAME check for any `*.sintrembert.be`
-5. **Certificate**: Wildcard cert for `*.sintrembert.be`
-6. **Traffic routing**:
-   - `portal.sintrembert.be` → Tenant A LXC
-   - `analytics.sintrembert.be` → Tenant A LXC
-   - `app1.sintrembert.be` → Tenant A LXC
-
-## Reverse Proxy Logic (Detailed)
-
-```nginx
-server {
-    listen 8080;
-    
-    # Extract tenant from host
-    set $tenant_slug "";
-    
-    # Pattern 1: *.cyantula.eu (tenant subdomain)
-    if ($host ~* ^(.+)\.cyantula\.eu$) {
-        set $tenant_slug $1;
-    }
-    
-    # Pattern 2: *.sintrembert.be (custom domain)
-    if ($host ~* ^(.+)\.sintrembert\.be$) {
-        set $tenant_slug $1;
-    }
-    
-    # Lookup tenant IP from database based on slug
-    location @route_tenant {
-        # Database lookup: SELECT ip FROM tenants WHERE slug = $tenant_slug
-        proxy_pass https://$tenant_ip;
-        proxy_set_header Host $host;
-    }
-}
-```
-
-## Portal Workflow
-
-1. Tenant registers `sintrembert.be`
-2. Portal stores `base_domain = sintrembert.be`
-3. Portal generates instructions for `*.sintrembert.be` CNAME
-4. Customer adds DNS record
-5. Portal verifies CNAME (any subdomain works)
-6. Portal registers wildcard with Cloudflare API
-7. Reverse proxy routes all `*.sintrembert.be` to tenant
+| Host Header | Tenant Slug | App Slug | Tenant IP | Description |
+|-------------|-------------|----------|-----------|-------------|
+| `portal.be` | `portal` | `portal` | 192.168.30.10 | Tenant A's portal app |
+| `portal.sintrembert.be` | `sintrembert` | `portal` | 192.168.30.20 | Tenant B's portal app |
+| `analytics.sintrembert.be` | `sintrembert` | `analytics` | 192.168.30.20 | Tenant B's analytics app |
+| `portal.cyantula.eu` | `portal` | `portal` | 192.168.30.100 | Main shared portal UI |
+| `analytics.be` | `analytics` | `analytics` | 192.168.30.10 | Tenant A's analytics app |
 
 ## Benefits
 
-1. **Wildcard DNS**: One CNAME for all apps
-2. **Same pattern as Cyantula**: Customer familiar with this
-3. **Cert automation**: Wildcard certificate for base domain
-4. **Flexible routing**: Portal controls which tenant handles which host
-5. **Verification**: CNAME check ensures domain ownership
+1. **Simple DNS**: Customer adds CNAME (per-app or wildcard)
+2. **Cert automation**: Individual or wildcard certificates via Cloudflare/Let's Encrypt
+3. **Same pattern as Cyantula**: Uses existing custom domain mechanism
+4. **Session handling**: `/__spin/claim` for cookies
+5. **No special routing**: Custom domains point to apps - same as existing
 
 ## Security
 
-- CNAME verification for `*.domain` ensures ownership
+- CNAME verification ensures domain ownership
 - Session forwarding via `/__spin/claim` for cookies
 - Reverse proxy only routes verified domains
 - TLS termination before tenant app
+
+## Implementation Steps
+
+1. Tenant onboards → creates LXC container
+2. Tenant creates apps (portal, analytics, etc.)
+3. Tenant adds custom domains for each app
+4. Portal verifies CNAMEs and registers with Cloudflare
+5. Reverse proxy routes based on Host header
+6. Traffic reaches correct app in tenant LXC
