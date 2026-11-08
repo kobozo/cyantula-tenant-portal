@@ -67,7 +67,7 @@ The portal supports two routing patterns:
 ### Pattern 1: Per-App Custom Domains
 
 ```
-Customer domain: sintrembert.be
+Customer domain: acme.be
 
 Apps accessed via:
 - portal.be → Tenant A's portal app (192.168.30.10)
@@ -75,22 +75,22 @@ Apps accessed via:
 - crm.be → Tenant A's CRM app (192.168.30.10)
 
 DNS setup:
-portal.be       CNAME → portal.sintrembert.cyantula.eu
-analytics.be    CNAME → analytics.sintrembert.cyantula.eu
-crm.be          CNAME → crm.sintrembert.cyantula.eu
+portal.be       CNAME → portal.acme.cyantula.eu
+analytics.be    CNAME → analytics.acme.cyantula.eu
+crm.be          CNAME → crm.acme.cyantula.eu
 ```
 
 ### Pattern 2: Base Domain Wildcard
 
 ```
-Customer domain: sintrembert.be
+Customer domain: acme.be
 
 Apps accessed via:
-- portal.sintrembert.be → Tenant A (192.168.30.10)
-- analytics.sintrembert.be → Tenant A (192.168.30.10)
+- portal.acme.be → Tenant A (192.168.30.10)
+- analytics.acme.be → Tenant A (192.168.30.10)
 
 DNS setup:
-*.sintrembert.be    CNAME → sintrembert.cyantula.eu
+*.acme.be    CNAME → acme.cyantula.eu
 ```
 
 ## API Endpoints

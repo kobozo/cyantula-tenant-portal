@@ -16,12 +16,12 @@ Cyantula has **two types of portals**:
 
 ## Scenario
 
-Customer domain: `sintrembert.be`
+Customer domain: `acme.be`
 
 Tenant wants:
-- Portal app: `portal.sintrembert.be` (their main branded entry point)
-- Analytics app: `analytics.sintrembert.be`
-- CRM app: `crm.sintrembert.be`
+- Portal app: `portal.acme.be` (their main branded entry point)
+- Analytics app: `analytics.acme.be`
+- CRM app: `crm.acme.be`
 
 ## DNS Setup
 
@@ -29,24 +29,24 @@ Tenant wants:
 
 ```
 Customer DNS:
-portal.be       CNAME    → portal.sintrembert.cyantula.eu
-analytics.be    CNAME    → analytics.sintrembert.cyantula.eu
-crm.be          CNAME    → crm.sintrembert.cyantula.eu
+portal.be       CNAME    → portal.acme.cyantula.eu
+analytics.be    CNAME    → analytics.acme.cyantula.eu
+crm.be          CNAME    → crm.acme.cyantula.eu
 
 Proxmox DNS:
-portal.sintrembert.cyantula.eu       A    → Tunnel
-analytics.sintrembert.cyantula.eu    A    → Tunnel
-crm.sintrembert.cyantula.eu          A    → Tunnel
+portal.acme.cyantula.eu       A    → Tunnel
+analytics.acme.cyantula.eu    A    → Tunnel
+crm.acme.cyantula.eu          A    → Tunnel
 ```
 
 **Option 2: Base Domain Wildcard**
 
 ```
 Customer DNS:
-*.sintrembert.be    CNAME    → sintrembert.cyantula.eu
+*.acme.be    CNAME    → acme.cyantula.eu
 
 Proxmox DNS:
-sintrembert.cyantula.eu    A    → Tunnel
+acme.cyantula.eu    A    → Tunnel
 ```
 
 ## Architecture
@@ -63,9 +63,9 @@ Cloudflare Tunnel (cloudflared on Proxmox)
        │
        └── Routes to tenant LXCs based on Host header
            ├── portal.be → 192.168.30.10:443 (Tenant A, "portal" app)
-           ├── portal.sintrembert.be → 192.168.30.10:443 (Tenant A, "portal" app)
+           ├── portal.acme.be → 192.168.30.10:443 (Tenant A, "portal" app)
            ├── analytics.be → 192.168.30.10:443 (Tenant A, "analytics" app)
-           ├── analytics.sintrembert.be → 192.168.30.10:443 (Tenant A, "analytics" app)
+           ├── analytics.acme.be → 192.168.30.10:443 (Tenant A, "analytics" app)
            └── *.cyantula.eu → Tenant routing
 ```
 
@@ -76,17 +76,17 @@ Cloudflare Tunnel (cloudflared on Proxmox)
 ```
 1. Tenant creates app named "portal"
 2. Tenant adds custom domain: portal.be
-3. System creates: portal.be → portal.sintrembert.cyantula.eu
-4. Customer adds DNS: portal.be CNAME portal.sintrembert.cyantula.eu
+3. System creates: portal.be → portal.acme.cyantula.eu
+4. Customer adds DNS: portal.be CNAME portal.acme.cyantula.eu
 5. Traffic: portal.be → Tenant A's "portal" app
 ```
 
 ### Base Domain Wildcard
 
 ```
-1. Tenant registers sintrembert.be as base domain
-2. System creates: *.sintrembert.be → sintrembert.cyantula.eu
-3. Customer adds DNS: *.sintrembert.be CNAME sintrembert.cyantula.eu
+1. Tenant registers acme.be as base domain
+2. System creates: *.acme.be → acme.cyantula.eu
+3. Customer adds DNS: *.acme.be CNAME acme.cyantula.eu
 4. All subdomains route to tenant (app selection via path or subdomain routing)
 ```
 
@@ -115,10 +115,10 @@ server {
         set $tenant_slug $1;  # Same as app for this pattern
     }
     
-    # Pattern 2: <<app>>.sintrembert.be (custom subdomain)
-    if ($host ~* ^(.+)\.sintrembert\.be$) {
+    # Pattern 2: <<app>>.acme.be (custom subdomain)
+    if ($host ~* ^(.+)\.acme\.be$) {
         set $app_slug $1;
-        set $tenant_slug "sintrembert";  # Base domain tenant
+        set $tenant_slug "acme";  # Base domain tenant
     }
     
     # Pattern 3: <<tenant>>.cyantula.eu (default)
@@ -143,7 +143,7 @@ CREATE TABLE tenant_custom_domains (
     tenant_id UUID REFERENCES tenants(id),
     hostname VARCHAR(255) UNIQUE NOT NULL,
     app_slug VARCHAR(255),  # For per-app domains like <<app>>.be
-    base_domain VARCHAR(255),  # For base domains like sintrembert.be
+    base_domain VARCHAR(255),  # For base domains like acme.be
     is_base_domain BOOLEAN DEFAULT FALSE,
     verified BOOLEAN DEFAULT FALSE,
     verified_at TIMESTAMPTZ,
@@ -168,17 +168,17 @@ POST   # Check CNAME verification
 {
   "hostname": "portal.be",
   "type": "CNAME",
-  "target": "portal.sintrembert.cyantula.eu",
-  "record": "portal.be  CNAME  portal.sintrembert.cyantula.eu"
+  "target": "portal.acme.cyantula.eu",
+  "record": "portal.be  CNAME  portal.acme.cyantula.eu"
 }
 
 # For base domain:
 {
-  "hostname": "sintrembert.be",
+  "hostname": "acme.be",
   "type": "CNAME",
-  "target": "sintrembert.cyantula.eu",
+  "target": "acme.cyantula.eu",
   "is_base_domain": true,
-  "record": "*.sintrembert.be  CNAME  sintrembert.cyantula.eu"
+  "record": "*.acme.be  CNAME  acme.cyantula.eu"
 }
 ```
 
@@ -187,8 +187,8 @@ POST   # Check CNAME verification
 | Host Header | Tenant Slug | App Slug | Tenant IP | Description |
 |-------------|-------------|----------|-----------|-------------|
 | `portal.be` | `portal` | `portal` | 192.168.30.10 | Tenant A's portal app |
-| `portal.sintrembert.be` | `sintrembert` | `portal` | 192.168.30.20 | Tenant B's portal app |
-| `analytics.sintrembert.be` | `sintrembert` | `analytics` | 192.168.30.20 | Tenant B's analytics app |
+| `portal.acme.be` | `acme` | `portal` | 192.168.30.20 | Tenant B's portal app |
+| `analytics.acme.be` | `acme` | `analytics` | 192.168.30.20 | Tenant B's analytics app |
 | `portal.cyantula.eu` | `portal` | `portal` | 192.168.30.100 | Main shared portal UI |
 | `analytics.be` | `analytics` | `analytics` | 192.168.30.10 | Tenant A's analytics app |
 

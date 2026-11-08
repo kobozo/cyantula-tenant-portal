@@ -21,7 +21,7 @@ class TestCNAMEValidation:
     def test_is_valid_hostname(self):
         """Test valid hostname detection."""
         assert is_valid_hostname("portal.be") is True
-        assert is_valid_hostname("analytics.sintrembert.be") is True
+        assert is_valid_hostname("analytics.acme.be") is True
         assert is_valid_hostname("app1.cyantula.eu") is True
         
         assert is_valid_hostname("") is False
@@ -31,19 +31,19 @@ class TestCNAMEValidation:
     
     def test_is_valid_wildcard_hostname(self):
         """Test wildcard hostname detection."""
-        assert is_valid_wildcard_hostname("*.sintrembert.be") is True
+        assert is_valid_wildcard_hostname("*.acme.be") is True
         assert is_valid_wildcard_hostname("*.cyantula.eu") is True
         
-        assert is_valid_wildcard_hostname("sintrembert.be") is False
+        assert is_valid_wildcard_hostname("acme.be") is False
         assert is_valid_wildcard_hostname("*.") is False
     
     def test_extract_base_domain(self):
         """Test base domain extraction."""
         # Returns last 2 parts (domain.tld)
         assert extract_base_domain("portal.be") == "portal.be"
-        assert extract_base_domain("portal.sintrembert.be") == "sintrembert.be"
-        assert extract_base_domain("analytics.sintrembert.be") == "sintrembert.be"
-        assert extract_base_domain("*.sintrembert.be") == "sintrembert.be"
+        assert extract_base_domain("portal.acme.be") == "acme.be"
+        assert extract_base_domain("analytics.acme.be") == "acme.be"
+        assert extract_base_domain("*.acme.be") == "acme.be"
         
         assert extract_base_domain("invalid") is None
         assert extract_base_domain("a.b.c.d") == "c.d"

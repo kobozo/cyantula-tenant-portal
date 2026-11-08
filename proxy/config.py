@@ -36,7 +36,7 @@ class Route:
         
         # Extract from hostname
         # portal.be -> portal
-        # portal.sintrembert.be -> portal
+        # portal.acme.be -> portal
         parts = self.hostname.split(".")
         return parts[0] if parts else "portal"
 
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     # Add routes
     config.add_route("portal.be", "tenant_a")
     config.add_route("analytics.be", "tenant_a")
-    config.add_route("portal.sintrembert.be", "tenant_b")
+    config.add_route("portal.acme.be", "tenant_b")
     
     # Generate NGINX config
     nginx_config = config.generate_nginx_config()

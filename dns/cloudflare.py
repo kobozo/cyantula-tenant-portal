@@ -237,7 +237,7 @@ class CloudflareClient:
         """
         # Extract base domain from hostname
         # For portal.be -> base domain is be
-        # For portal.sintrembert.be -> base domain is sintrembert.be
+        # For portal.acme.be -> base domain is acme.be
         parts = hostname.split(".")
         
         if len(parts) < 2:

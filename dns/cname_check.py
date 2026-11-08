@@ -34,8 +34,8 @@ def extract_base_domain(hostname: str) -> Optional[str]:
     
     Examples:
         portal.be -> be
-        portal.sintrembert.be -> sintrembert.be
-        *.sintrembert.be -> sintrembert.be
+        portal.acme.be -> acme.be
+        *.acme.be -> acme.be
     """
     hostname = normalize_hostname(hostname)
     
@@ -48,8 +48,8 @@ def extract_base_domain(hostname: str) -> Optional[str]:
         return None
     
     # Return last two parts (domain.tld) or more for subdomains
-    # For sintrembert.be -> sintrembert.be
-    # For portal.sintrembert.be -> sintrembert.be
+    # For acme.be -> acme.be
+    # For portal.acme.be -> acme.be
     if len(parts) >= 2:
         return ".".join(parts[-2:])
     

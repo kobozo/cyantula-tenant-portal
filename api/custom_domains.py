@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/custom-domains", tags=["custom-domains"])
 
 # Pydantic models for requests/responses
 class CustomDomainCreate(BaseModel):
-    hostname: str = Field(..., description="The custom domain hostname (e.g., portal.be or *.sintrembert.be)")
+    hostname: str = Field(..., description="The custom domain hostname (e.g., portal.be or *.acme.be)")
     tenant_id: str = Field(..., description="Tenant identifier")
     base_domain: Optional[str] = Field(None, description="Base domain if using wildcard pattern")
     is_wildcard: bool = Field(default=False, description="Whether this is a wildcard domain")

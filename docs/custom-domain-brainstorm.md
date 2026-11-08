@@ -2,22 +2,22 @@
 
 ## Scenario
 
-Customer has their own domain: `sintrembert.be`
+Customer has their own domain: `acme.be`
 
-Goal: `sintrembert.be` → Customer's tenant instance (sintrembert.cyantula.eu)
+Goal: `acme.be` → Customer's tenant instance (acme.cyantula.eu)
 
 ## Options
 
 ### Option 1: DNS CNAME
 ```
-sintrembert.be  CNAME  → sintrembert.cyantula.eu
+acme.be  CNAME  → acme.cyantula.eu
 ```
 -Pros: Simple, Cloudflare handles it
--Cons: Browser shows sintrembert.cyantula.eu (unless proxying)
+-Cons: Browser shows acme.cyantula.eu (unless proxying)
 
 ### Option 2: HTTPS Proxy
 ```
-sintrembert.be → Reverse Proxy → sintrembert.cyantula.eu → Tenant
+acme.be → Reverse Proxy → acme.cyantula.eu → Tenant
 ```
 -Pros: Clean URL, SSL works
 -Cons: More complex, two hops
@@ -35,20 +35,20 @@ sintrembert.be → Reverse Proxy → sintrembert.cyantula.eu → Tenant
 ### DNS Setup
 ```
 Customer DNS:
-sintrembert.be    A      → Cloudflare IP (via CNAME to portal.cyantula.eu)
+acme.be    A      → Cloudflare IP (via CNAME to portal.cyantula.eu)
 
 Or:
-sintrembert.be    CNAME  → sintrembert.cyantula.eu
+acme.be    CNAME  → acme.cyantula.eu
 ```
 
 ### Reverse Proxy with Custom Domains
 ```
 server {
     listen 443 ssl;
-    server_name sintrembert.be www.sintrembert.be;
+    server_name acme.be www.acme.be;
     
-    ssl_certificate /etc/ssl/custom/sintrembert.be.crt;
-    ssl_certificate_key /etc/ssl/custom/sintrembert.be.key;
+    ssl_certificate /etc/ssl/custom/acme.be.crt;
+    ssl_certificate_key /etc/ssl/custom/acme.be.key;
     
     location / {
         proxy_pass https://192.168.30.10;

@@ -29,13 +29,13 @@ class Tenant(Base):
         String(255),
         unique=True,
         nullable=False,
-        comment="Tenant URL slug (e.g., sintrembert)"
+        comment="Tenant URL slug (e.g., acme)"
     )
     
     base_domain = Column(
         String(255),
         nullable=True,
-        comment="Base domain for tenant (e.g., sintrembert.be)"
+        comment="Base domain for tenant (e.g., acme.be)"
     )
     
     proxmox_ip = Column(
@@ -113,7 +113,7 @@ class CustomDomain(Base):
     base_domain = Column(
         String(255),
         nullable=True,
-        comment="Base domain if using wildcard pattern (e.g., sintrembert.be)"
+        comment="Base domain if using wildcard pattern (e.g., acme.be)"
     )
     
     is_wildcard = Column(

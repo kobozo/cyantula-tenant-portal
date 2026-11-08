@@ -29,7 +29,7 @@ class TestReverseProxyConfig:
         """Test slug extraction from hostnames."""
         route1 = Route(hostname="portal.be", tenant_id="tenant_a")
         route2 = Route(hostname="analytics.be", tenant_id="tenant_a")
-        route3 = Route(hostname="portal.sintrembert.be", tenant_id="tenant_b")
+        route3 = Route(hostname="portal.acme.be", tenant_id="tenant_b")
         
         assert route1.slug == "portal"
         assert route2.slug == "analytics"
@@ -47,7 +47,7 @@ class TestReverseProxyConfig:
         config.add_upstream("tenant_a", "192.168.30.10")
         config.add_upstream("tenant_b", "192.168.30.20")
         config.add_route("portal.be", "tenant_a")
-        config.add_route("portal.sintrembert.be", "tenant_b")
+        config.add_route("portal.acme.be", "tenant_b")
         
         nginx_config = config.generate_nginx_config()
         

@@ -30,7 +30,7 @@ class TestCustomDomainEndpoints:
         domain_data = {
             "hostname": "portal.be",
             "tenant_id": "test_tenant_123",
-            "base_domain": "sintrembert.be",
+            "base_domain": "acme.be",
             "is_wildcard": False
         }
         
