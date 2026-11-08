@@ -1,93 +1,144 @@
 # Proxmox & Architecture Setup
 
-## Complete Architecture
+## Cloudflare Tunnel Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  NEW Proxmox Server (192.168.30.100)                            │
-│  Full isolation - ALL containers on this single Proxmox        │
-│                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  VLAN 30: Tenant Network                                │   │
-│  │  ├─ LXC 100: cyantula-tenant-portal                    │   │
-│  │  │   └─ IP: 192.168.30.100                              │   │
-│  │  │   └─ NGINX/Traefik reverse proxy                     │   │
-│  │  │      ├─ cyantula.eu → portal                         │   │
-│  │  │      └─ *.cyantula.eu → tenant LXCs                  │   │
-│  │  │                                                       │   │
-│  │  ├─ LXC 101: tenant-a.cyantula.eu                       │   │
-│  │  │   └─ IP: 192.168.30.10                               │   │
-│  │  │   └─ Cyantula instance                              │   │
-│  │  │                                                       │   │
-│  │  ├─ LXC 102: tenant-b.cyantula.eu                       │   │
-│  │  │   └─ IP: 192.168.30.20                               │   │
-│  │  │   └─ Cyantula instance                              │   │
-│  │  │                                                       │   │
-│  │  └─ LXC 103: tenant-c.cyantula.com                     │   │
-│  │      └─ IP: 192.168.30.30                               │   │
-│  │      └─ Cyantula instance                              │   │
+│  │  Cloudflare Tunnel (cloudflared)                        │   │
+│  │  ├─ portal.cyantula.eu → 192.168.30.100:443            │   │
+│  │  └─ *.cyantula.eu → 192.168.30.100:443 (Proxy)         │   │
 │  │                                                           │   │
-│  │  └─ Tenant isolation (no inter-tenant communication)   │   │
+│  │  ┌───────────────────────────────────────────────────┐  │   │
+│  │  │  VLAN 30: Tenant Network                          │  │   │
+│  │  │  ├─ LXC 100: Portal (192.168.30.100)              │  │   │
+│  │  │  │   └─ NGINX/Traefik reverse proxy               │  │   │
+│  │  │  │      └─ Routes *.cyantula.eu to tenant LXCs    │  │   │
+│  │  │  │                                                 │  │   │
+│  │  │  ├─ LXC 101: tenant-a.cyantula.eu (192.168.30.10) │  │   │
+│  │  │  │   └─ Cyantula instance                         │  │   │
+│  │  │  │                                                 │  │   │
+│  │  │  ├─ LXC 102: tenant-b.cyantula.eu (192.168.30.20) │  │   │
+│  │  │  │   └─ Cyantula instance                         │  │   │
+│  │  │  │                                                 │  │   │
+│  │  │  └─ LXC 103: tenant-c.cyantula.com (192.168.30.30)│  │   │
+│  │  │      └─ Cyantula instance                         │  │   │
+│  │  │                                                     │  │   │
+│  │  │  └─ Tenant isolation (no inter-tenant comm)       │  │   │
+│  │  └───────────────────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ Your forwarding rules
-                              ▼
+
 Internet
    │
-   ├─ cyantula.eu → 192.168.30.100 (portal)
-   └─ *.cyantula.eu → 192.168.30.100 (proxy routes to tenants)
-
-EXISTING Server: 192.168.1.240 (NO CHANGES - production data)
+   ▼
+Cloudflare (DNS + Argo Tunnel)
+   │
+   ├── portal.cyantula.eu → Tunnel → 192.168.30.100
+   │
+   └── *.cyantula.eu → Tunnel → 192.168.30.100
+       │
+       └── Reverse proxy routes to tenant LXCs
 ```
 
-## Network Isolation
+## Your Setup (Minimal)
 
-```
-VLAN 30 (192.168.30.0/24):
-   ├── Portal (192.168.30.100) - reverse proxy + management
-   ├── Tenant A (192.168.30.10) - isolated
-   ├── Tenant B (192.168.30.20) - isolated
-   └── Tenant C (192.168.30.30) - isolated
-   
-   └─ NO communication between tenants
-   └─ NO access to production (192.168.1.0/24)
-```
+### 1. Cloudflare Tunnel on Proxmox
 
-## Your Setup (From Your Network)
-
-You need to configure forwarding:
+Install `cloudflared` on the Proxmox server (192.168.30.100):
 
 ```bash
-# Your network → New Proxmox VLAN 30
-cyantula.eu → 192.168.30.100
-*.cyantula.eu → 192.168.30.100
+# Install cloudflared
+curl -L --cloudflare-access https://bin.equinox.io/c/bNyj1mQVY4c/cloudflared-linux-amd64.tar.gz -o cloudflared.tar.gz
+tar xzvf cloudflared.tar.gz
+sudo cp cloudflared /usr/local/bin/
+
+# Login to Cloudflare
+cloudflared tunnel login
+
+# Create tunnel
+cloudflared tunnel create cyantula-portal
 ```
 
-The reverse proxy on the Proxmox then routes to the correct tenant LXC.
+### 2. Tunnel Configuration
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: cyantula-portal
+credentials-file: /home/user/.cloudflared/cyantula-portal.json
+
+ingress:
+  - hostname: portal.cyantula.eu
+    service: http://127.0.0.1:8000  # Portal API
+  
+  - hostname: "*.cyantula.eu"
+    service: http://127.0.0.1:8080  # Reverse proxy
+  
+  - service: http_status:404
+```
+
+### 3. Run Tunnel
+
+```bash
+cloudflared tunnel run cyantula-portal
+```
+
+### 4. DNS in Cloudflare
+
+```
+portal.cyantula.eu    A    (tunnel)
+*.cyantula.eu         A    (tunnel)
+```
+
+## Reverse Proxy on Proxmox
+
+NGINX/Traefik routes to tenant LXCs:
+
+```nginx
+# NGINX config
+upstream tenant_a {
+    server 192.168.30.10:443;
+}
+
+upstream tenant_b {
+    server 192.168.30.20:443;
+}
+
+server {
+    listen 8080;
+    server_name ~^(?<tenant>.+)\.cyantula\.eu$;
+    
+    location / {
+        proxy_pass http://$tenant;
+    }
+}
+```
+
+## Benefits
+
+1. **Zero network changes** - No port forwarding needed
+2. **Cloudflare handles TLS** - Auto SSL certificates
+3. **Full isolation** - All on one Proxmox, VLAN 30 only
+4. **Secure** - Traffic stays within Cloudflare network
+5. **Easy** - Just run `cloudflared tunnel`
 
 ## Who Runs Where
 
-| Component | Proxmox | VLAN | IP | Notes |
-|-----------|---------|------|-----|-------|
-| **Cyantula Tenant Portal** | New Proxmox | VLAN 30 | 192.168.30.100 | Reverse proxy + management |
-| **Tenant A** | New Proxmox | VLAN 30 | 192.168.30.10 | Cyantula instance |
-| **Tenant B** | New Proxmox | VLAN 30 | 192.168.30.20 | Cyantula instance |
-| **Tenant C** | New Proxmox | VLAN 30 | 192.168.30.30 | Cyantula instance |
-| **Production Data** | Existing Server | N/A | 192.168.1.240 | **NO CHANGES** |
-
-## Key Benefits
-
-1. **Complete isolation:** All containers on single Proxmox
-2. **No production impact:** Existing server untouched
-3. **Your control:** You configure forwarding from your network
-4. **Simplified networking:** All on one Proxmox, one VLAN
-5. **Security:** Tenants isolated from each other
+| Component | Proxmox | VLAN | IP | Access |
+|-----------|---------|------|-----|--------|
+| **Cloudflare Tunnel** | New Proxmox | VLAN 30 | 192.168.30.100 | portal.cyantula.eu, *.cyantula.eu |
+| **Cyantula Portal** | New Proxmox | VLAN 30 | 192.168.30.100 | Internal: 8000 |
+| **Reverse Proxy** | New Proxmox | VLAN 30 | 192.168.30.100 | Internal: 8080 |
+| **Tenant A** | New Proxmox | VLAN 30 | 192.168.30.10 | 192.168.30.10:443 |
+| **Tenant B** | New Proxmox | VLAN 30 | 192.168.30.20 | 192.168.30.20:443 |
 
 ## Implementation Steps
 
 1. Install new Proxmox (192.168.30.100)
-2. Configure VLAN 30 on Proxmox
-3. Create LXC templates for Cyantula
-4. Deploy cyantula-tenant-portal (with reverse proxy)
-5. CI/CD creates tenant LXCs automatically
+2. Install cloudflared on Proxmox
+3. Create tunnel and configure DNS
+4. Configure reverse proxy for tenant routing
+5. Deploy cyantula-tenant-portal
+6. CI/CD creates tenant LXCs
