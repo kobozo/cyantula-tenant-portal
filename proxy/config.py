@@ -58,39 +58,17 @@ server {
     
     # Route to tenant based on Host header
     set $tenant_slug "";
-    set $app_slug "";
     
-    # Pattern 1: <<app>>.be (custom domain per app)
-    if ($host ~* ^(.+)\.be$) {
-        set $app_slug $1;
-        set $tenant_slug $1;
-    }
-    
-    # Pattern 2: <<app>>.sintrembert.be (custom subdomain)
-    if ($host ~* ^(.+)\.{{ base_domain }}$) {
-        set $app_slug $1;
-        set $tenant_slug "{{ tenant_id }}";
-    }
-    
-    # Pattern 3: <<tenant>>.cyantula.eu (default)
+    # Pattern 1: <<tenant>>.cyantula.eu (default)
     if ($host ~* ^(.+)\.cyantula\.eu$) {
         set $tenant_slug $1;
     }
     
-    # Pattern 4: portal.cyantula.eu (main portal)
-    if ($host == "portal.cyantula.eu") {
-        set $tenant_slug "portal";
-    }
-    
     # Route to tenant
     location @route_tenant {
-        # Database lookup would happen here
-        # For now, use static mapping
-        {% for upstream in upstreams %}
-        {% if loop.first %}if ($tenant_slug = "{{ upstream.tenant_id }}") {% endif %}
+        {% for upstream in upstreams %}if ($tenant_slug = "{{ upstream.tenant_id }}") {
             proxy_pass {{ upstream.protocol }}://{{ upstream.address }};
-        {% endif %}
-        {% endfor %}
+        }{% endfor %}
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -162,30 +140,25 @@ server {
     
     def generate_caddy_config(self) -> str:
         """Generate Caddy configuration (alternative to NGINX)."""
-        caddy_template = """
-{
+        caddy_template = """{
     admin off
 }
 
-{
-    base_domain} {
+:{{ port }} {
     # Reverse proxy for tenant domains
-    @tenants {
-        host *.{{ base_domain }}
-    }
-    
-    route @tenants {
-        reverse_proxy {match:
-            # Extract tenant from Host header
-            {{ # Each upstream }}
-            {{# each upstreams }}
-            {{ hostname }} {{ protocol }}://{{ address }}
-            {{/ each }}
+    route {
+        # Extract tenant from Host header
+        {% for upstream in upstreams %}
+        if ({host} ends with ".{{ upstream.tenant_id }}.{{ base_domain }}") {
+            reverse_proxy {{ upstream.protocol }}://{{ upstream.address }}
         }
+        {% endfor %}
+        
+        proxy_set_header Host {host}
     }
     
-    :{{ portal_port }} {
-        respond "Portal not configured"
+    handle {
+        reverse_proxy http://127.0.0.1:{{ portal_port }}
     }
 }
 """
@@ -193,6 +166,7 @@ server {
         return template.render(
             base_domain=self.base_domain,
             portal_port=self.portal_port,
+            port=self.port,
             upstreams=self.upstreams
         )
 
