@@ -1,96 +1,93 @@
 # Proxmox & Architecture Setup
 
-## Physical Infrastructure
+## Complete Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  NEW Proxmox Server (192.168.30.100)                            │
-│  VLAN 30 interface                                              │
-│  ├─ LXC 100: cyantula-tenant-portal (management)              │
-│  │   └─ IP: 192.168.30.100                                    │
-│  ├─ LXC 101: tenant-a.cyantula.eu                              │
-│  │   └─ IP: 192.168.30.10                                     │
-│  ├─ LXC 102: tenant-b.cyantula.eu                              │
-│  │   └─ IP: 192.168.30.20                                     │
-│  └─ LXC 103: tenant-c.cyantula.com                            │
-│      └─ IP: 192.168.30.30                                     │
+│  Full isolation - ALL containers on this single Proxmox        │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  VLAN 30: Tenant Network                                │   │
+│  │  ├─ LXC 100: cyantula-tenant-portal                    │   │
+│  │  │   └─ IP: 192.168.30.100                              │   │
+│  │  │   └─ NGINX/Traefik reverse proxy                     │   │
+│  │  │      ├─ cyantula.eu → portal                         │   │
+│  │  │      └─ *.cyantula.eu → tenant LXCs                  │   │
+│  │  │                                                       │   │
+│  │  ├─ LXC 101: tenant-a.cyantula.eu                       │   │
+│  │  │   └─ IP: 192.168.30.10                               │   │
+│  │  │   └─ Cyantula instance                              │   │
+│  │  │                                                       │   │
+│  │  ├─ LXC 102: tenant-b.cyantula.eu                       │   │
+│  │  │   └─ IP: 192.168.30.20                               │   │
+│  │  │   └─ Cyantula instance                              │   │
+│  │  │                                                       │   │
+│  │  └─ LXC 103: tenant-c.cyantula.com                     │   │
+│  │      └─ IP: 192.168.30.30                               │   │
+│  │      └─ Cyantula instance                              │   │
+│  │                                                           │   │
+│  │  └─ Tenant isolation (no inter-tenant communication)   │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              │ VLAN 30
+                              │ Your forwarding rules
                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  EXISTING Server (192.168.1.240) - PRODUCTION (NO CHANGES)     │
-│  VLAN 30 interface (only for management access to new Proxmox) │
-│  └─ Customer data stays here (unchanged)                       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Network Architecture
-
-```
 Internet
    │
-   ▼
-Firewall (OPNsense/router)
-   │
-   ├── VLAN 30: 192.168.30.0/24 (Tenant instances)
-   │   ├── LXC 100: 192.168.30.100 (Portal - management)
-   │   ├── LXC 101: 192.168.30.10 (Tenant A)
-   │   ├── LXC 102: 192.168.30.20 (Tenant B)
-   │   └── LXC 103: 192.168.30.30 (Tenant C)
-   │
-   └── VLAN 31: 192.168.31.0/24 (Management - optional)
-       └─ LXC 100: 192.168.31.100 (Portal)
-   
-   └── VLAN 32: 192.168.1.0/24 (Production - EXISTING)
-       └── 192.168.1.240 (Customer data - NO CHANGES)
+   ├─ cyantula.eu → 192.168.30.100 (portal)
+   └─ *.cyantula.eu → 192.168.30.100 (proxy routes to tenants)
+
+EXISTING Server: 192.168.1.240 (NO CHANGES - production data)
 ```
 
-## Firewall Rules
+## Network Isolation
+
+```
+VLAN 30 (192.168.30.0/24):
+   ├── Portal (192.168.30.100) - reverse proxy + management
+   ├── Tenant A (192.168.30.10) - isolated
+   ├── Tenant B (192.168.30.20) - isolated
+   └── Tenant C (192.168.30.30) - isolated
+   
+   └─ NO communication between tenants
+   └─ NO access to production (192.168.1.0/24)
+```
+
+## Your Setup (From Your Network)
+
+You need to configure forwarding:
 
 ```bash
-# Block tenant VLAN from accessing production
-VLAN 30 → 192.168.1.0/24    DENY
-
-# Block tenant-to-tenant communication
-VLAN 30 → VLAN 30           DENY
-
-# Allow portal to communicate with tenants (outbound only)
-Portal (VLAN 30/31) → Tenants (VLAN 30)  ALLOW (management)
+# Your network → New Proxmox VLAN 30
+cyantula.eu → 192.168.30.100
+*.cyantula.eu → 192.168.30.100
 ```
+
+The reverse proxy on the Proxmox then routes to the correct tenant LXC.
 
 ## Who Runs Where
 
-| Component | Location | VM/LXC ID | IP | Notes |
-|-----------|----------|-----------|-----|-------|
-| **Cyantula Tenant Portal** | New Proxmox | LXC 100 | 192.168.30.100 | Management only |
-| **Tenant A** | New Proxmox | LXC 101 | 192.168.30.10 | Cyantula instance |
-| **Tenant B** | New Proxmox | LXC 102 | 192.168.30.20 | Cyantula instance |
-| **Tenant C** | New Proxmox | LXC 103 | 192.168.30.30 | Cyantula instance |
+| Component | Proxmox | VLAN | IP | Notes |
+|-----------|---------|------|-----|-------|
+| **Cyantula Tenant Portal** | New Proxmox | VLAN 30 | 192.168.30.100 | Reverse proxy + management |
+| **Tenant A** | New Proxmox | VLAN 30 | 192.168.30.10 | Cyantula instance |
+| **Tenant B** | New Proxmox | VLAN 30 | 192.168.30.20 | Cyantula instance |
+| **Tenant C** | New Proxmox | VLAN 30 | 192.168.30.30 | Cyantula instance |
 | **Production Data** | Existing Server | N/A | 192.168.1.240 | **NO CHANGES** |
 
-## Key Points
+## Key Benefits
 
-1. **ALL LXC containers run on the NEW Proxmox server**
-2. **Existing server at 192.168.1.240 is untouched** - only has VLAN 30 interface for management access
-3. **Tenant isolation:** VLAN 30 tenants cannot see each other
-4. **Portal runs on NEW Proxmox** - not on production server
-
-## VLAN 30 Communication Flow
-
-```
-Portal (192.168.30.100) ──outbound──► Tenant A (192.168.30.10)
-Portal (192.168.30.100) ──outbound──► Tenant B (192.168.30.20)
-Portal (192.168.30.100) ──outbound──► Tenant C (192.168.30.30)
-
-Tenant A ──DENY──► Tenant B  (isolated)
-Tenant B ──DENY──► Tenant C  (isolated)
-```
+1. **Complete isolation:** All containers on single Proxmox
+2. **No production impact:** Existing server untouched
+3. **Your control:** You configure forwarding from your network
+4. **Simplified networking:** All on one Proxmox, one VLAN
+5. **Security:** Tenants isolated from each other
 
 ## Implementation Steps
 
-1. Install new Proxmox on VLAN 30 (192.168.30.100)
-2. Configure firewall rules (block VLAN 30 → production)
-3. Create LXC templates
-4. Deploy cyantula-tenant-portal in LXC 100
-5. CI/CD creates tenant LXCs as needed
+1. Install new Proxmox (192.168.30.100)
+2. Configure VLAN 30 on Proxmox
+3. Create LXC templates for Cyantula
+4. Deploy cyantula-tenant-portal (with reverse proxy)
+5. CI/CD creates tenant LXCs automatically
