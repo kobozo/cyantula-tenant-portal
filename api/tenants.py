@@ -191,6 +191,26 @@ async def generate_setup_token(slug: str):
     return {"setup_token": new_token, "expires_at": expires_at.isoformat()}
 
 
+@router.get("/setup-token/{token}")
+async def validate_setup_token(token: str):
+    """Validate a setup token and return tenant info."""
+    for slug, tenant in tenants_db.items():
+        if tenant.get("setup_token") == token:
+            expires_at = datetime.fromisoformat(tenant["setup_token_expiry"])
+            if datetime.utcnow() > expires_at:
+                raise HTTPException(status_code=400, detail="Setup token has expired")
+            return {
+                "valid": True,
+                "tenant_id": tenant["id"],
+                "slug": tenant["slug"],
+                "name": tenant["name"],
+                "expires_at": tenant["setup_token_expiry"],
+                "proxmox_ip": tenant.get("proxmox_ip"),
+                "proxmox_vmid": tenant.get("proxmox_vmid"),
+            }
+    raise HTTPException(status_code=404, detail="Invalid setup token")
+
+
 @router.delete("/{slug}")
 async def delete_tenant(slug: str):
     """Delete a tenant and their LXC container."""
