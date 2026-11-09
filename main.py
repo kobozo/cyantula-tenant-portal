@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.custom_domains import router as custom_domains_router
+from api.tenants import router as tenants_router
 from database.models import Base
 
 # Database URL from environment
@@ -58,3 +59,4 @@ async def shutdown():
 
 # Include routers
 app.include_router(custom_domains_router)
+app.include_router(tenants_router)

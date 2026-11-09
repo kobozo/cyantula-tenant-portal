@@ -123,22 +123,43 @@ class ProxmoxClient:
     
     def get_lxc_status(self, node: str, vmid: int) -> Dict[str, Any]:
         """Get LXC container status."""
-        result = self._request("GET", f"/nodes/{node}/lxc/{vmid}")
-        return result.get("data", {})
+        result = self._request("GET", f"/nodes/{node}/lxc/{vmid}/status/current")
+        return result.get("data") or {}
+    
+    def _run_pct_command(self, *args: str) -> str:
+        """Run a pct command on the Proxmox host via SSH."""
+        import subprocess
+        
+        # Build full shell command and execute via SSH with strict host key check disabled
+        full_cmd = "pct " + " ".join(args)
+        
+        ssh_cmd = [
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            f"root@{self.config.node}",
+            full_cmd
+        ]
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            raise Exception(f"pct command failed: {result.stderr}")
+        
+        return result.stdout
     
     def create_lxc_container(
         self,
         vmid: int,
         hostname: str,
-        storage: str = "local-lvm",
-        cores: int = 2,
-        memory: int = 2048,
+        storage: str = "local",
+        cores: int = 1,
+        memory: int = 1024,
         disk_size: int = 10,
-        ostemplate: str = "debian-12-standard_12.12-1_amd64.tar.zst",
+        ostemplate: str = "debian-13-standard_13.6-1_amd64.tar.zst",
         password: Optional[str] = None,
         ip: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create a new LXC container.
+        """Create a new LXC container using pct CLI (most reliable method).
         
         Args:
             vmid: Container ID (unique)
@@ -154,30 +175,28 @@ class ProxmoxClient:
         Returns:
             Task result dict
         """
+        import secrets
+        
         # Auto-generate root password if not provided
         if password is None:
-            import secrets
             password = secrets.token_urlsafe(16)
         
-        data = {
-            "vmid": vmid,
-            "hostname": hostname,
-            "ostemplate": f"{storage}:vztmpl/{ostemplate}",
-            "cores": cores,
-            "memory": memory,
-            "disk": f"local-lvm:{disk_size}",
-            "password": password,
-            "nameserver": "192.168.3.1",
-            "searchdomain": "kobozo.internal",
-            "net0": "name=eth0,bridge=vmbr0,ip=dhcp,ip6=dhcp",
-        }
+        template = f"{storage}:vztmpl/{ostemplate}"
         
-        # Add static IP if provided
-        if ip:
-            data["net0"] = f"name=eth0,bridge=vmbr0,gw=192.168.3.1,ip={ip}/24,ip6=dhcp"
+        # Run pct create command
+        self._run_pct_command(
+            "create", str(vmid),
+            template,
+            f"--hostname {hostname}",
+            f"--cores {cores}",
+            f"--memory {memory}",
+            f"--rootfs {storage}-lvm:{disk_size}",
+            f"--password {password}",
+            "--net0 name=eth0,bridge=vmbr0,ip=dhcp",
+            "--ostype debian",
+        )
         
-        result = self._request("POST", f"/nodes/{self.config.node}/lxc", data=data)
-        return result
+        return {"message": "Container creation completed"}
     
     def start_lxc_container(self, node: str, vmid: int) -> Dict[str, Any]:
         """Start an LXC container."""
@@ -237,19 +256,25 @@ class ProxmoxClient:
         status: str = "running",
         timeout: int = 120,
     ) -> bool:
-        """Wait for a container to reach a specific status.
+        """Wait for a container to reach a specific status. Starts the container if needed.
         
         Args:
             node: Node name
             vmid: Container ID
             status: Target status (running, stopped)
             timeout: Timeout in seconds
-            
+             
         Returns:
             True if status reached, False on timeout
         """
         import time
         start_time = time.time()
+        
+        # Start container if not running
+        if status == "running":
+            current_status = self.get_lxc_status(node, vmid).get("status")
+            if current_status != "running":
+                self.start_lxc_container(node, vmid)
         
         while time.time() - start_time < timeout:
             container_status = self.get_lxc_status(node, vmid)
