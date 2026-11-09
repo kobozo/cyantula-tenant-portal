@@ -2,7 +2,7 @@
 import os
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
-import requests
+import httpx
 from urllib.parse import urljoin
 
 
@@ -84,7 +84,7 @@ class ProxmoxClient:
             "Content-Type": "application/x-www-form-urlencoded",
         }
         
-        response = requests.request(
+        response = httpx.request(
             method=method,
             url=url,
             headers=headers,
