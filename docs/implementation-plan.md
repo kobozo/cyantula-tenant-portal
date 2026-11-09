@@ -164,11 +164,12 @@
 
 ## Open Questions
 
-1. **Proxmox API authentication:** Token-based (recommended) vs password?
+1. **Proxmox API authentication:** Token-based ✅ (tested and working)
 2. **Database migrations:** Alembic vs SQLAlchemy create_all() for MVP?
 3. **Email provider:** SMTP relay vs SendGrid vs Mailgun?
 4. **Reverse proxy:** NGINX (manual) vs Caddy (auto-SSL) vs Traefik?
-5. **LXC template:** Use Proxmox template or create custom one?
+5. **LXC template:** Debian 12 standard ✅ (confirmed working)
+6. **Proxmox node:** kb-pvecyantula01 (192.168.3.211) on VLAN 30
 
 ## Recommended Initial Action
 
