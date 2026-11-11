@@ -112,6 +112,9 @@ async def create_tenant(data: TenantCreate):
         # Wait for container to start
         proxmox.wait_for_container(proxmox.config.node, vmid, status="running")
         
+        # Install Cyantula in the container
+        proxmox.install_cyantula(proxmox.config.node, vmid)
+        
         # Get container IP
         config = proxmox.get_lxc_config(proxmox.config.node, vmid)
         net0 = config.get("net0", "")

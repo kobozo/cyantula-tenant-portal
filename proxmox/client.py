@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 class ProxmoxConfig:
     """Proxmox server configuration."""
     api_url: str = "https://192.168.3.211:8006"
-    api_token_id: str = "root@pam!tenant-portal"
+    api_token_id: str = "tenant-portal@pve!tenant-portal-token"
     api_token_secret: str = ""
     node: str = "pve"
     
@@ -19,7 +19,7 @@ class ProxmoxConfig:
         """Create config from environment variables."""
         return cls(
             api_url=os.getenv("PROXMOX_API_URL", "https://192.168.3.211:8006"),
-            api_token_id=os.getenv("PROXMOX_API_TOKEN_ID", "root@pam!tenant-portal"),
+            api_token_id=os.getenv("PROXMOX_API_TOKEN_ID", "tenant-portal@pve!tenant-portal-token"),
             api_token_secret=os.getenv("PROXMOX_API_TOKEN_SECRET"),
             node=os.getenv("PROXMOX_NODE", "kb-pvecyantula01"),
         )
@@ -196,6 +196,12 @@ class ProxmoxClient:
             "--ostype debian",
         )
         
+        # Cleanup docker.list file that causes apt issues in some templates
+        self._run_pct_command(
+            "enter", str(vmid),
+            "bash", "-c", "rm -f /etc/apt/sources.list.d/docker.list"
+        )
+        
         return {"message": "Container creation completed"}
     
     def start_lxc_container(self, node: str, vmid: int) -> Dict[str, Any]:
@@ -212,6 +218,45 @@ class ProxmoxClient:
         """Delete an LXC container."""
         result = self._request("DELETE", f"/nodes/{node}/lxc/{vmid}")
         return result
+    
+    def install_cyantula(self, node: str, vmid: int) -> Dict[str, Any]:
+        """Install Cyantula in an LXC container.
+        
+        Args:
+            node: Node name
+            vmid: Container ID
+            
+        Returns:
+            Installation result dict
+        """
+        import time
+        
+        # Wait for container to be running
+        max_wait = 60
+        wait_count = 0
+        while wait_count < max_wait:
+            status = self.get_lxc_status(node, vmid)
+            if status.get("status") == "running":
+                break
+            time.sleep(2)
+            wait_count += 2
+        
+        if wait_count >= max_wait:
+            raise Exception("Container did not start within timeout")
+        
+        # Install curl (required for Cyantula install script)
+        self._run_pct_command(
+            "enter", str(vmid),
+            "bash", "-c", "apt-get update && apt-get install -y curl"
+        )
+        
+        # Download and run Cyantula install script
+        self._run_pct_command(
+            "enter", str(vmid),
+            "bash", "-c", "curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
+        )
+        
+        return {"message": "Cyantula installation completed"}
     
     def get_lxc_config(self, node: str, vmid: int) -> Dict[str, Any]:
         """Get LXC container configuration."""
