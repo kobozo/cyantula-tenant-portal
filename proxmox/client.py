@@ -199,8 +199,8 @@ class ProxmoxClient:
         
         # Cleanup docker.list file that causes apt issues in some templates
         self._run_pct_command(
-            "enter", str(vmid),
-            "bash", "-c", "rm -f /etc/apt/sources.list.d/docker.list"
+            "exec", str(vmid),
+            "--", "bash", "-c", "rm -f /etc/apt/sources.list.d/docker.list"
         )
         
         return {"message": "Container creation completed"}
