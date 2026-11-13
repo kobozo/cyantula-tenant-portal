@@ -289,9 +289,9 @@ class ProxmoxClient:
             "exec", str(vmid), "--", "/bin/bash", "-c", "apt-get update && apt-get install -y curl"
         )
         
-        # Download and run Cyantula install script
+        # Download and run Cyantula install script with /usr/local/bin in PATH
         self._run_pct_command(
-            "exec", str(vmid), "--", "/bin/bash", "-c", "curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
+            "exec", str(vmid), "--", "/bin/bash", "-c", "export PATH=/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin && curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
         )
         
         return {"message": "Cyantula installation completed"}
