@@ -156,8 +156,8 @@ class ProxmoxClient:
         import subprocess
         import shlex
         
-        # Build full shell command with proper quoting to handle spaces in args
-        full_cmd = "pct " + " ".join(shlex.quote(arg) for arg in args)
+        # Use shlex.join to properly quote the entire command
+        full_cmd = "pct " + shlex.join(args)
         
         ssh_cmd = [
             "ssh",
@@ -268,8 +268,12 @@ class ProxmoxClient:
             raise Exception("Container did not start within timeout")
         
         # Cleanup docker.list file that causes apt issues in some templates
+        # Use pct enter with heredoc to avoid quoting issues
+        script = """#!/bin/bash
+rm -f '/etc/apt/sources.list.d/docker.list' 2>/dev/null || true
+"""
         self._run_pct_command(
-            "exec", str(vmid), "--", "/bin/bash", "-c", "rm -f '/etc/apt/sources.list.d/docker.list' 2>/dev/null || true"
+            "enter", str(vmid), "--", "/bin/bash", "-c", script
         )
         
         # Install curl (required for Cyantula install script)
