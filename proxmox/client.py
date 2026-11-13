@@ -155,6 +155,7 @@ class ProxmoxClient:
         """Run a pct command on the Proxmox host via SSH."""
         import subprocess
         import shlex
+        import sys
         
         # Build the command with proper quoting for SSH
         # Use shlex.quote for each arg and join with spaces
@@ -162,7 +163,8 @@ class ProxmoxClient:
         full_cmd = "pct " + " ".join(quoted_args)
         
         # Debug: log the command
-        print(f"DEBUG: full_cmd={full_cmd}", flush=True)
+        sys.stderr.write(f"DEBUG: full_cmd={full_cmd}\n")
+        sys.stderr.flush()
         
         # Use ssh without shell=True and pass the command as a single argument
         # This prevents the shell from adding extra quotes that break pct arg parsing
@@ -175,7 +177,8 @@ class ProxmoxClient:
         ]
         result = subprocess.run(ssh_cmd, capture_output=True, text=True)
         
-        print(f"DEBUG: returncode={result.returncode}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}", flush=True)
+        sys.stderr.write(f"DEBUG: returncode={result.returncode}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}\n")
+        sys.stderr.flush()
         
         if result.returncode != 0:
             raise Exception(f"pct command failed: {result.stderr}")
