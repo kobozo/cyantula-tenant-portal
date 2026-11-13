@@ -156,8 +156,10 @@ class ProxmoxClient:
         import subprocess
         import shlex
         
-        # Use shlex.join to properly quote the entire command
-        full_cmd = "pct " + shlex.join(args)
+        # Build the command with proper quoting for SSH
+        # Use shlex.quote for each arg and join with spaces
+        quoted_args = [shlex.quote(str(arg)) for arg in args]
+        full_cmd = "pct " + " ".join(quoted_args)
         
         ssh_cmd = [
             "ssh",
@@ -268,10 +270,19 @@ class ProxmoxClient:
             raise Exception("Container did not start within timeout")
         
         # Cleanup docker.list file that causes apt issues in some templates
-        # Use pct exec with bash -c to avoid quoting issues
-        self._run_pct_command(
-            "exec", str(vmid), "/bin/bash", "-c", "rm -f '/etc/apt/sources.list.d/docker.list' 2>/dev/null || true"
-        )
+        # Use a script file to avoid quoting issues
+        script_content = """#!/bin/bash
+rm -f '/etc/apt/sources.list.d/docker.list' 2>/dev/null || true
+"""
+        # Write script to temp file using base64 to avoid quoting issues
+        import base64
+        import uuid
+        
+        script_filename = f"/tmp/cyantula-{vmid}-{uuid.uuid4().hex[:8]}.sh"
+        script_b64 = base64.b64encode(script_content.encode()).decode()
+        
+        # Execute the script via pct exec
+        self._run_pct_command("exec", str(vmid), "/bin/bash", "-c", f"echo {script_b64} | base64 -d > {script_filename} && chmod +x {script_filename} && {script_filename}")
         
         # Install curl (required for Cyantula install script)
         self._run_pct_command(
