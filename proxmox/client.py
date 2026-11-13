@@ -350,6 +350,7 @@ class ProxmoxClient:
             if current_status != "running":
                 print(f"DEBUG wait_for_container: Starting VMID {vmid}...")
                 self.start_lxc_container(node, vmid)
+                time.sleep(2)  # Wait for container to fully start
         
         while time.time() - start_time < timeout:
             container_status = self.get_lxc_status(node, vmid)
