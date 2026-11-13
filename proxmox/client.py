@@ -270,8 +270,8 @@ class ProxmoxClient:
             raise Exception("Container did not start within timeout")
         
         # Cleanup docker.list file that causes apt issues in some templates
-        # Use pct exec with -- to prevent argument splitting
-        self._run_pct_command("exec", str(vmid), "--", "/bin/bash", "-c", "rm -f '/etc/apt/sources.list.d/docker.list' 2>/dev/null || true")
+        # Use pct exec with bash -c and double quotes to prevent argument splitting
+        self._run_pct_command("exec", str(vmid), "/bin/bash", "-c", "rm -f \"/etc/apt/sources.list.d/docker.list\" 2>/dev/null || true")
         
         # Install curl (required for Cyantula install script)
         self._run_pct_command(
