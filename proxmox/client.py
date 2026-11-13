@@ -221,17 +221,18 @@ class ProxmoxClient:
         
         template = f"{storage}:vztmpl/{ostemplate}"
         
-        # Run pct create command
+        # Run pct create command with proper argument separation
+        # Each option and its value must be separate arguments for pct
         self._run_pct_command(
             "create", str(vmid),
             template,
-            f"--hostname {hostname}",
-            f"--cores {cores}",
-            f"--memory {memory}",
-            f"--rootfs {storage}-lvm:{disk_size}",
-            f"--password {password}",
-            "--net0 name=eth0,bridge=vmbr0,ip=dhcp",
-            "--ostype debian",
+            "--hostname", hostname,
+            "--cores", str(cores),
+            "--memory", str(memory),
+            "--rootfs", f"{storage}-lvm:{disk_size}",
+            "--password", password,
+            "--net0", "name=eth0,bridge=vmbr0,ip=dhcp",
+            "--ostype", "debian",
         )
         
         import time
