@@ -138,9 +138,15 @@ class ProxmoxClient:
         return containers
     
     def get_lxc_status(self, node: str, vmid: int) -> Dict[str, Any]:
-        """Get LXC container status."""
-        result = self._request("GET", f"/nodes/{node}/lxc/{vmid}/status/current")
-        return result.get("data") or {}
+        """Get LXC container status.
+        
+        Uses pct list instead of API to avoid permission issues.
+        """
+        containers = self.get_lxc_containers()
+        for c in containers:
+            if c["vmid"] == vmid:
+                return {"data": {"status": c["status"]}}
+        return {"data": {"status": "unknown"}}
     
     def _run_pct_command(self, *args: str) -> str:
         """Run a pct command on the Proxmox host via SSH."""
