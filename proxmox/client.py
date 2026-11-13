@@ -221,6 +221,9 @@ class ProxmoxClient:
             "--ostype debian",
         )
         
+        import time
+        time.sleep(2)  # Wait for container to be fully created before status checks
+        
         return {"message": "Container creation completed"}
     
     def start_lxc_container(self, node: str, vmid: int) -> Dict[str, Any]:
