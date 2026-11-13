@@ -90,7 +90,9 @@ async def create_tenant(data: TenantCreate):
             raise HTTPException(status_code=400, detail="Tenant with this slug already exists")
     
     # Find next available VM ID from Proxmox
+    containers = proxmox.get_lxc_containers()
     vmid = proxmox.find_next_vmid()
+    print(f"DEBUG: Found {len(containers)} containers, next VMID: {vmid}")
     
     # Generate setup token
     setup_token = secrets.token_urlsafe(32)
