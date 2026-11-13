@@ -269,20 +269,17 @@ class ProxmoxClient:
         
         # Cleanup docker.list file that causes apt issues in some templates
         self._run_pct_command(
-            "exec", str(vmid),
-            "--", "sh", "-c", "rm -f /etc/apt/sources.list.d/docker.list || true"
+            "exec", str(vmid), "sh", "-c", "rm -f /etc/apt/sources.list.d/docker.list || true"
         )
         
         # Install curl (required for Cyantula install script)
         self._run_pct_command(
-            "exec", str(vmid),
-            "--", "sh", "-c", "apt-get update && apt-get install -y curl"
+            "exec", str(vmid), "sh", "-c", "apt-get update && apt-get install -y curl"
         )
         
         # Download and run Cyantula install script
         self._run_pct_command(
-            "exec", str(vmid),
-            "--", "sh", "-c", "curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
+            "exec", str(vmid), "sh", "-c", "curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
         )
         
         return {"message": "Cyantula installation completed"}
