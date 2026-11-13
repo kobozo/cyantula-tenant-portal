@@ -257,8 +257,8 @@ class ProxmoxClient:
         max_wait = 60
         wait_count = 0
         while wait_count < max_wait:
-            status = self.get_lxc_status(node, vmid)
-            if status.get("status") == "running":
+            status_data = self.get_lxc_status(node, vmid).get("data") or {}
+            if status_data.get("status") == "running":
                 break
             time.sleep(2)
             wait_count += 2
