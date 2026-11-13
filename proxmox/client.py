@@ -221,9 +221,9 @@ class ProxmoxClient:
         return {"message": "Container creation completed"}
     
     def start_lxc_container(self, node: str, vmid: int) -> Dict[str, Any]:
-        """Start an LXC container."""
-        result = self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/start")
-        return result
+        """Start an LXC container using pct CLI to avoid permission issues."""
+        output = self._run_pct_command("start", str(vmid))
+        return {"message": "Container started", "output": output}
     
     def stop_lxc_container(self, node: str, vmid: int) -> Dict[str, Any]:
         """Stop an LXC container."""
