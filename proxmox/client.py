@@ -233,6 +233,10 @@ class ProxmoxClient:
             "--password", password,
             "--net0", "name=eth0,bridge=vmbr0,ip=dhcp",
             "--ostype", "debian",
+            "--unprivileged", "1",
+            # Docker inside an unprivileged LXC needs nesting (overlayfs mounts)
+            # and keyctl; without these image extraction fails with EPERM.
+            "--features", "keyctl=1,nesting=1",
         )
         
         import time
