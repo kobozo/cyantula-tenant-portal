@@ -122,16 +122,19 @@ class ProxmoxClient:
         output = self._run_pct_command("list")
         
         containers = []
-        for line in output.strip().split("\n")[2:]:  # Skip header lines
+        for line in output.strip().split("\n")[1:]:  # Skip header line
             if not line.strip():
                 continue
             parts = line.split()
-            if len(parts) >= 3:
-                containers.append({
-                    "vmid": int(parts[0]),
-                    "status": parts[1],
-                    "name": parts[2] if len(parts) > 2 else ""
-                })
+            if len(parts) >= 2:
+                try:
+                    containers.append({
+                        "vmid": int(parts[0]),
+                        "status": parts[1],
+                        "name": parts[3] if len(parts) > 3 else ""
+                    })
+                except (ValueError, IndexError):
+                    continue
         return containers
     
     def get_lxc_status(self, node: str, vmid: int) -> Dict[str, Any]:
