@@ -154,9 +154,10 @@ class ProxmoxClient:
     def _run_pct_command(self, *args: str) -> str:
         """Run a pct command on the Proxmox host via SSH."""
         import subprocess
+        import shlex
         
-        # Build full shell command and execute via SSH with strict host key check disabled
-        full_cmd = "pct " + " ".join(args)
+        # Build full shell command with proper quoting to handle spaces in args
+        full_cmd = "pct " + " ".join(shlex.quote(arg) for arg in args)
         
         ssh_cmd = [
             "ssh",
@@ -269,19 +270,19 @@ class ProxmoxClient:
         # Cleanup docker.list file that causes apt issues in some templates
         self._run_pct_command(
             "exec", str(vmid),
-            "bash", "-c", "rm -f /etc/apt/sources.list.d/docker.list || true"
+            "--", "bash", "-c", "rm -f /etc/apt/sources.list.d/docker.list || true"
         )
         
         # Install curl (required for Cyantula install script)
         self._run_pct_command(
             "exec", str(vmid),
-            "bash", "-c", "apt-get update && apt-get install -y curl"
+            "--", "bash", "-c", "apt-get update && apt-get install -y curl"
         )
         
         # Download and run Cyantula install script
         self._run_pct_command(
             "exec", str(vmid),
-            "bash", "-c", "curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
+            "--", "bash", "-c", "curl -fsSL https://github.com/kobozo/cyantula-releases/releases/latest/download/install.sh | bash"
         )
         
         return {"message": "Cyantula installation completed"}
