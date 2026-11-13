@@ -161,10 +161,17 @@ class ProxmoxClient:
         quoted_args = [shlex.quote(str(arg)) for arg in args]
         full_cmd = "pct " + " ".join(quoted_args)
         
-        # Use ssh with -t and pass the command as a single argument to prevent splitting
-        # The entire command is passed as a single argument to ssh
-        ssh_cmd = f"ssh -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@{self.config.node} '{full_cmd}'"
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, shell=True)
+        # Use ssh without shell=True and pass the command as a single argument
+        # This prevents the shell from adding extra quotes that break pct arg parsing
+        ssh_cmd = [
+            "ssh",
+            "-t",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            f"root@{self.config.node}",
+            full_cmd
+        ]
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             raise Exception(f"pct command failed: {result.stderr}")
