@@ -138,15 +138,24 @@ class ProxmoxClient:
         return containers
     
     def get_lxc_status(self, node: str, vmid: int) -> Dict[str, Any]:
-        """Get LXC container status.
+        """Get LXC container status by parsing pct list output directly.
         
-        Uses pct list instead of API to avoid permission issues.
+        Avoids race conditions by not using cached container list.
+        Returns None if container not found (not yet created).
         """
-        containers = self.get_lxc_containers()
-        for c in containers:
-            if c["vmid"] == vmid:
-                return {"data": {"status": c["status"]}}
-        return {"data": {"status": "unknown"}}
+        output = self._run_pct_command("list")
+        
+        for line in output.strip().split("\n")[1:]:  # Skip header
+            if not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    if int(parts[0]) == vmid:
+                        return {"data": {"status": parts[1]}}
+                except (ValueError, IndexError):
+                    continue
+        return {"data": None}  # Container not found
     
     def _run_pct_command(self, *args: str) -> str:
         """Run a pct command on the Proxmox host via SSH."""
