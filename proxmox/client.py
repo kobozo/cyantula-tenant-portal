@@ -301,9 +301,18 @@ class ProxmoxClient:
         return {"message": "Cyantula installation completed"}
     
     def get_lxc_config(self, node: str, vmid: int) -> Dict[str, Any]:
-        """Get LXC container configuration."""
-        result = self._request("GET", f"/nodes/{node}/lxc/{vmid}/config")
-        return result.get("data", {})
+        """Get LXC container configuration via `pct config` (API token lacks VM.Audit)."""
+        return self._parse_pct_config(self._run_pct_command("config", str(vmid)))
+
+    @staticmethod
+    def _parse_pct_config(output: str) -> Dict[str, Any]:
+        """Parse `pct config` output ("key: value" per line) into a dict."""
+        config: Dict[str, Any] = {}
+        for line in output.splitlines():
+            key, sep, value = line.partition(": ")
+            if sep and key and not key.startswith(("#", " ")):
+                config[key.strip()] = value.strip()
+        return config
     
     def update_lxc_config(
         self,
