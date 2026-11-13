@@ -118,9 +118,21 @@ class ProxmoxClient:
         Args:
             node: Optional node name. If None, lists on default node.
         """
-        target_node = node or self.config.node
-        result = self._request("GET", f"/nodes/{target_node}/lxc")
-        return result.get("data", [])
+        # Use pct list command to get accurate container information
+        output = self._run_pct_command("list")
+        
+        containers = []
+        for line in output.strip().split("\n")[2:]:  # Skip header lines
+            if not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) >= 3:
+                containers.append({
+                    "vmid": int(parts[0]),
+                    "status": parts[1],
+                    "name": parts[2] if len(parts) > 2 else ""
+                })
+        return containers
     
     def get_lxc_status(self, node: str, vmid: int) -> Dict[str, Any]:
         """Get LXC container status."""
