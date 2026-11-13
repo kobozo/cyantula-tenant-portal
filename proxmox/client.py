@@ -269,7 +269,7 @@ class ProxmoxClient:
         
         # Cleanup docker.list file that causes apt issues in some templates
         self._run_pct_command(
-            "exec", str(vmid), "--", "bash", "-c", "rm -f '/etc/apt/sources.list.d/docker.list' || true"
+            "exec", str(vmid), "--", "bash", "-c", "rm -f '/etc/apt/sources.list.d/docker.list' 2>/dev/null || true"
         )
         
         # Install curl (required for Cyantula install script)
