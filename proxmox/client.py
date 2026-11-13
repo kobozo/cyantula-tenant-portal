@@ -165,7 +165,6 @@ class ProxmoxClient:
         # This prevents the shell from adding extra quotes that break pct arg parsing
         ssh_cmd = [
             "ssh",
-            "-t",
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             f"root@{self.config.node}",
