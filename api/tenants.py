@@ -1,4 +1,5 @@
 """API endpoints for tenant management."""
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta
@@ -11,6 +12,7 @@ from database.models import Tenant, CustomDomain, Base
 from proxmox.client import ProxmoxClient, ProxmoxConfig
 
 router = APIRouter(prefix="/api/tenants", tags=["tenants"])
+logger = logging.getLogger(__name__)
 
 # Database session (will be properly injected later)
 def get_db():
@@ -55,6 +57,7 @@ class TenantResponse(BaseModel):
     proxmox_ip: Optional[str]
     status: str
     setup_token: Optional[str]
+    setup_url: Optional[str] = None
     created_at: str
 
 
@@ -82,81 +85,51 @@ tenants_db: dict[str, dict] = {}
 @router.post("", response_model=TenantResponse)
 async def create_tenant(data: TenantCreate):
     """Create a new tenant with Proxmox LXC container."""
-    # Check if slug already exists in Proxmox
     proxmox = get_proxmox_client()
-    containers = proxmox.get_lxc_containers()
-    for c in containers:
-        if c.get("hostname") == f"{data.slug}-tenant":
-            raise HTTPException(status_code=400, detail="Tenant with this slug already exists")
-    
-    # Find next available VM ID from Proxmox
-    containers = proxmox.get_lxc_containers()
+    hostname = f"{data.slug}-tenant"
+
+    # Reject duplicates: Proxmox is the source of truth for existing tenants
+    if any(c.get("name") == hostname for c in proxmox.get_lxc_containers()):
+        raise HTTPException(status_code=400, detail="Tenant with this slug already exists")
+
     vmid = proxmox.find_next_vmid()
-    print(f"DEBUG: Found {len(containers)} containers, next VMID: {vmid}")
-    
-    # Generate setup token
-    setup_token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=24)
-    
-    # Create LXC container
+
     try:
-        import traceback
-        hostname = f"{data.slug}-tenant"
-        result = proxmox.create_lxc_container(
+        proxmox.create_lxc_container(
             vmid=vmid,
             hostname=hostname,
             cores=data.slug.count("") % 4 + 1,  # Simple core allocation
             memory=2048,
             disk_size=10,
-            password=secrets.token_hex(8),  # Use hex instead of urlsafe for simpler passwords
+            password=secrets.token_hex(8),
         )
-        
-        # Wait for container to start
-        proxmox.wait_for_container(proxmox.config.node, vmid, status="running")
-        
-        # Install Cyantula in the container
+        if not proxmox.wait_for_container(proxmox.config.node, vmid, status="running"):
+            raise RuntimeError(f"LXC {vmid} did not reach 'running'")
         proxmox.install_cyantula(proxmox.config.node, vmid)
-        
-        # Get container IP
-        config = proxmox.get_lxc_config(proxmox.config.node, vmid)
-        net0 = config.get("net0", "")
-        
-        # Parse IP from net0 (format: name=eth0,bridge=vmbr0,ip=dhcp,gw=192.168.3.1)
-        ip = None
-        if "ip=" in net0:
-            ip_part = net0.split("ip=")[1].split(",")[0]
-            if ip_part != "dhcp":
-                ip = ip_part
-        
-    except Exception as e:
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to create LXC container: {str(e)}\n\nTraceback:\n{tb}")
-    
-    # Store tenant
-    tenant_id = f"tenant_{secrets.token_hex(8)}"
-    
-    # Get the actual IP address from the container
-    if ip is None:
-        config = proxmox.get_lxc_config(proxmox.config.node, vmid)
-        net0 = config.get("net0", "")
-        if "ip=" in net0:
-            ip_part = net0.split("ip=")[1].split(",")[0]
-            if ip_part != "dhcp":
-                ip = ip_part
-            else:
-                # DHCP - need to check the actual IP from container
-                # This will be populated later when the app is deployed
-                ip = None
-    
+
+        # DHCP-assigned address and Cyantula's own setup token, read from the container
+        ip = proxmox.get_container_ip(vmid)
+        setup = proxmox.get_setup_token(vmid)
+        if not setup["token"]:
+            raise RuntimeError(f"No setup token returned by cyantula in LXC {vmid}")
+    except Exception:
+        logger.exception("Tenant provisioning failed for slug=%s vmid=%s", data.slug, vmid)
+        raise HTTPException(
+            status_code=500,
+            detail="We could not set up this tenant right now. Please try again later.",
+        )
+
+    expires_at = datetime.utcnow() + timedelta(hours=24)
     tenant_data = {
-        "id": tenant_id,
+        "id": f"tenant_{secrets.token_hex(8)}",
         "name": data.name,
         "slug": data.slug,
         "base_domain": data.base_domain,
         "proxmox_ip": ip,
         "proxmox_vmid": vmid,
         "status": "active",
-        "setup_token": setup_token,
+        "setup_token": setup["token"],
+        "setup_url": setup["url"],
         "setup_token_expiry": expires_at.isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     }
@@ -182,18 +155,28 @@ async def get_tenant(slug: str):
 
 @router.post("/{slug}/setup-token", response_model=SetupTokenResponse)
 async def generate_setup_token(slug: str):
-    """Generate a new setup token for a tenant."""
+    """Refresh the tenant's setup token from Cyantula inside its container."""
     if slug not in tenants_db:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    
+
     tenant = tenants_db[slug]
-    new_token = secrets.token_urlsafe(32)
+    try:
+        setup = get_proxmox_client().get_setup_token(tenant["proxmox_vmid"])
+    except Exception:
+        logger.exception("Reading setup token failed for slug=%s", slug)
+        setup = {"token": None, "url": None}
+    if not setup["token"]:
+        raise HTTPException(
+            status_code=503,
+            detail="The setup token is not available right now. Please try again later.",
+        )
+
     expires_at = datetime.utcnow() + timedelta(hours=24)
-    
-    tenant["setup_token"] = new_token
+    tenant["setup_token"] = setup["token"]
+    tenant["setup_url"] = setup["url"]
     tenant["setup_token_expiry"] = expires_at.isoformat()
-    
-    return {"setup_token": new_token, "expires_at": expires_at.isoformat()}
+
+    return {"setup_token": setup["token"], "expires_at": expires_at.isoformat()}
 
 
 @router.get("/setup-token/{token}")

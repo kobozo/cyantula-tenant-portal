@@ -155,30 +155,19 @@ class ProxmoxClient:
         """Run a pct command on the Proxmox host via SSH."""
         import subprocess
         import shlex
-        import sys
         
-        # Build the command with proper quoting for SSH
-        # Use shlex.quote for each arg and join with spaces
-        quoted_args = [shlex.quote(str(arg)) for arg in args]
-        full_cmd = "pct " + " ".join(quoted_args)
+        # The remote shell re-parses the command string, so quote every arg.
+        full_cmd = "pct " + " ".join(shlex.quote(str(arg)) for arg in args)
         
-        # Debug: log the command
-        sys.stderr.write(f"DEBUG: full_cmd={full_cmd}\n")
-        sys.stderr.flush()
-        
-        # Use ssh without shell=True and pass the command as a single argument
-        # This prevents the shell from adding extra quotes that break pct arg parsing
         ssh_cmd = [
             "ssh",
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
             f"root@{self.config.node}",
             full_cmd
         ]
         result = subprocess.run(ssh_cmd, capture_output=True, text=True)
-        
-        sys.stderr.write(f"DEBUG: returncode={result.returncode}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}\n")
-        sys.stderr.flush()
         
         if result.returncode != 0:
             raise Exception(f"pct command failed: {result.stderr}")
@@ -299,6 +288,45 @@ class ProxmoxClient:
         )
         
         return {"message": "Cyantula installation completed"}
+
+    def _exec_in_container(self, vmid: int, command: str) -> str:
+        """Run a shell command inside a container and return its stdout."""
+        return self._run_pct_command(
+            "exec", str(vmid), "--", "/bin/bash", "-c",
+            f"export LC_ALL=C PATH=/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin; {command}",
+        )
+
+    def get_container_ip(self, vmid: int) -> Optional[str]:
+        """Return the IPv4 address of the container's eth0 (DHCP-assigned)."""
+        return self._parse_ipv4(self._exec_in_container(vmid, "ip -4 -o addr show dev eth0"))
+
+    @staticmethod
+    def _parse_ipv4(output: str) -> Optional[str]:
+        """Extract the first IPv4 address from `ip -4 -o addr` output."""
+        import re
+        match = re.search(r"\binet (\d{1,3}(?:\.\d{1,3}){3})/", output)
+        return match.group(1) if match else None
+
+    def get_setup_token(self, vmid: int) -> Dict[str, Optional[str]]:
+        """Read Cyantula's own setup token and setup URL from the container."""
+        return self._parse_setup_token(
+            self._exec_in_container(vmid, "CYANTULA_DIR=/opt/cyantula cyantula setup-token")
+        )
+
+    @staticmethod
+    def _parse_setup_token(output: str) -> Dict[str, Optional[str]]:
+        """Parse `cyantula setup-token` output ("setup token: X" / "open: URL")."""
+        result: Dict[str, Optional[str]] = {"token": None, "url": None}
+        for line in output.splitlines():
+            key, sep, value = line.partition(":")
+            if not sep:
+                continue
+            key = key.strip()
+            if key == "setup token":
+                result["token"] = value.strip() or None
+            elif key == "open":
+                result["url"] = value.strip() or None
+        return result
     
     def get_lxc_config(self, node: str, vmid: int) -> Dict[str, Any]:
         """Get LXC container configuration via `pct config` (API token lacks VM.Audit)."""
@@ -365,32 +393,17 @@ class ProxmoxClient:
         """
         import time
         start_time = time.time()
-        
-        # Start container if not running
-        if status == "running":
-            current_status = self.get_lxc_status(node, vmid).get("status")
-            print(f"DEBUG wait_for_container: VMID {vmid} current status: {current_status}, target: {status}")
-            
-            # Check status with retry - container might not be fully created yet
-            if current_status is None:
-                print(f"DEBUG wait_for_container: VMID {vmid} not found yet, waiting...")
-                time.sleep(1)
-                current_status = self.get_lxc_status(node, vmid).get("status")
-                print(f"DEBUG wait_for_container: VMID {vmid} status after retry: {current_status}")
-            
-            # Start if still not running
-            if current_status is None or current_status != "running":
-                print(f"DEBUG wait_for_container: Starting VMID {vmid}...")
-                self.start_lxc_container(node, vmid)
-                time.sleep(2)
-        
+
+        def current() -> Optional[str]:
+            # get_lxc_status returns {"data": {"status": ...}} or {"data": None}
+            return (self.get_lxc_status(node, vmid).get("data") or {}).get("status")
+
+        if status == "running" and current() != "running":
+            self.start_lxc_container(node, vmid)
+
         while time.time() - start_time < timeout:
-            container_status = self.get_lxc_status(node, vmid)
-            current_status = container_status.get("status")
-            
-            if current_status == status:
+            if current() == status:
                 return True
-            
             time.sleep(2)
-        
+
         return False
