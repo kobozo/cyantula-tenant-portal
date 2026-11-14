@@ -1,141 +1,148 @@
-# Proxmox Setup Instructions
+# Proxmox & Architecture Setup
 
-## Infrastructure
-
-```
-Proxmox Host: 192.168.1.240 (VLAN 30)
-Network: 192.168.30.0/24
-Gateway: 192.168.30.1
-DNS: 192.168.1.53
-```
-
-## Architectuur
+## Cloudflare Tunnel Architecture
 
 ```
 Internet
    │
    ▼
-VLAN 30 (192.168.30.0/24)
+Cloudflare (DNS + Argo Tunnel)
    │
-   ├─── 192.168.30.100 (LXC 100: cyantula-portal)
-   │    ├── Tenant Portal API
-   │    ├── Provisioning engine
-   │    ├── Template generator (via CI)
-   │    ├── Release management
-   │    └── Auto-update voor tenant apps
+   ├── cyantula.eu ──────┐
+   │                     │
+   ├── portal.cyantula.eu ──────────→ Tunnel → 192.168.30.100:8000 (Portal API)
    │
-   ├─── 192.168.30.101-199 (LXC: tenant instances)
-   │    └── Cyantula per tenant
+   ├── *.cyantula.eu ────────────────→ Tunnel → 192.168.30.100:8080 (Reverse Proxy)
+   │                                 │
+   │                                 └── Routes to tenant LXCs
+   │                                     ├── tenant-a.cyantula.eu → 192.168.30.10:443
+   │                                     └── tenant-b.cyantula.eu → 192.168.30.20:443
    │
-   └─── 192.168.30.200 (LXC: cyantula-app)
-        ├── Template generator
-        ├── Release builder (CI)
-        └── Package publisher
+   └── www.cyantula.eu ──────────────→ existing-website.com (geen tunnel, oude website)
 ```
 
-## Proxmox Installatie
+## Cloudflare DNS Setup
 
-### 1. Installatie
+```dns
+cyantula.eu           CNAME   → portal.cyantula.eu (tunnel)
+www.cyantula.eu       A       → existing-website-ip (geen tunnel)
+portal.cyantula.eu    A       → Tunnel
+*.cyantula.eu         A       → Tunnel
+```
 
-Install Proxmox VE op 192.168.1.240 met VLAN 30 support.
+## Cloudflare Tunnel Configuration
 
-### 2. Netwerk Configuratie
-
-Bewerk `/etc/network/interfaces`:
+Install `cloudflared` on Proxmox (192.168.30.100):
 
 ```bash
-auto lo
-iface lo inet loopback
+# Install
+curl -L https://bin.equinox.io/c/bNyj1mQVY4c/cloudflared-linux-amd64.tar.gz -o cloudflared.tar.gz
+tar xzvf cloudflared.tar.gz
+sudo cp cloudflared /usr/local/bin/
 
-auto eth0
-iface eth0 inet manual
+# Login
+cloudflared tunnel login
 
-# VLAN 30
-auto eth0.30
-iface eth0.30 inet static
-    address 192.168.30.100
-    netmask 255.255.255.0
-    gateway 192.168.30.1
-    vlan-raw-device eth0
-
-# Bridge voor LXC/VMs
-auto vmbr0
-iface vmbr0 inet static
-    address 192.168.30.100
-    netmask 255.255.255.0
-    bridge_ports eth0.30
-    bridge_stp off
-    bridge_fd 0
+# Create tunnel
+cloudflared tunnel create cyantula-portal
 ```
 
-### 3. Proxmox Updaten
+### Tunnel Config (`~/.cloudflared/config.yml`)
+
+```yaml
+tunnel: cyantula-portal
+credentials-file: /home/user/.cloudflared/cyantula-portal.json
+
+ingress:
+  # www.cyantula.eu → existing website (geen tunnel)
+  - hostname: www.cyantula.eu
+    service: https://existing-website-ip:443
+  
+  # cyantula.eu en portal.cyantula.eu → portal
+  - hostname: cyantula.eu
+    service: http://127.0.0.1:8000
+  - hostname: portal.cyantula.eu
+    service: http://127.0.0.1:8000
+  
+  # *.cyantula.eu → reverse proxy
+  - hostname: "*.cyantula.eu"
+    service: http://127.0.0.1:8080
+  
+  - service: http_status:404
+```
+
+### Run Tunnel
 
 ```bash
-echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve-install-repo.list
-wget -O- https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
-apt update && apt full-upgrade -y
+cloudflared tunnel run cyantula-portal
 ```
 
-### 4. DNS
+## Reverse Proxy Configuration
 
-```bash
-nameserver 192.168.1.53
-search cyantula.eu
+NGINX op Proxmox (192.168.30.100) op poort 8080:
+
+```nginx
+upstream tenant_a {
+    server 192.168.30.10:443;
+}
+
+upstream tenant_b {
+    server 192.168.30.20:443;
+}
+
+server {
+    listen 8080;
+    
+    # Tenant routing
+    location ~ ^/(?<tenant>.+)\.cyantula\.eu(/.*)?$ {
+        proxy_pass https://$tenant;
+        proxy_set_header Host $host;
+        proxy_ssl_verify off;
+    }
+    
+    # Default to portal
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+    }
+}
 ```
 
-## LXC Containers
+## Complete Flow
 
-### Cyantula Portal (LXC 100)
+```
+User visits:
+├─ cyantula.eu → Cloudflare Tunnel → 192.168.30.100:8000 → Portal
+├─ portal.cyantula.eu → Cloudflare Tunnel → 192.168.30.100:8000 → Portal
+├─ tenant-a.cyantula.eu → Cloudflare Tunnel → 192.168.30.100:8080 → 192.168.30.10:443
+└─ www.cyantula.eu → existing website (geen tunnel)
 
-Deze LXC draait de tenant portal en de CI/CD pipeline.
+Port numbers:
+├─ Portal API: 8000 (internal)
+├─ Reverse Proxy: 8080 (internal)
+└─ Tenant instances: 443 (HTTPS)
+```
 
-**Hardware:**
-- CPU: 4 vCPUs
-- RAM: 8 GB
-- Disk: 50 GB SSD
+## Benefits
 
-**Network:**
-- IP: 192.168.30.100/24
-- Gateway: 192.168.30.1
+1. **www.cyantula.eu** blijft bestaande website
+2. **cyantula.eu/portal** → nieuwe portal
+3. **Tenants** → `*.cyantula.eu` routing
+4. **Geen forwarding** - Cloudflare regelt alles
+5. **Volledige isolatie** - VLAN 30
 
-**Functies:**
-- Tenant Portal API (FastAPI)
-- Provisioning engine
-- Template generator (via CI)
-- Release management
-- Auto-update tenant apps
+## DNS in Cloudflare (samenvatting)
 
-### Tenant LXC Containers (LXC 101-199)
+| Record | Type | Value | Purpose |
+|--------|------|-------|---------|
+| cyantula.eu | CNAME | portal.cyantula.eu | Portal main domain |
+| www.cyantula.eu | A | existing-website-ip | Oude website |
+| portal.cyantula.eu | A | Tunnel | Portal API |
+| *.cyantula.eu | A | Tunnel | Tenant routing |
 
-Elke tenant krijgt een eigen LXC container.
+## Implementation Steps
 
-**Hardware per tenant:**
-- CPU: 2 vCPUs
-- RAM: 4 GB
-- Disk: 20 GB SSD
-
-**Network:**
-- Elke tenant heeft eigen IP in 192.168.30.x/24 subnet
-- Volledige isolatie tussen tenants
-
-**Functies:**
-- Cyantula app per tenant
-- Auto-update via portal
-- Gedeclareerd bij template update
-
-## CI/CD Pipeline
-
-De cyantula-app in LXC doet:
-
-1. **Template Generator**: Genereert LXC templates voor tenants
-2. **Release Builder**: Buildt nieuwe Cyantula versies
-3. **Package Publisher**: Publiceert packages voor auto-update
-
-## Volgende Stappen
-
-Na Proxmox installatie:
-1. LXC 100 aanmaken voor cyantula-portal
-2. Cyantula app installeren in LXC 100
-3. CI/CD pipeline configureren
-4. Template generator opstarten
-5. Tenant onboarding flow testen
+1. Proxmox installeren (192.168.30.100)
+2. cloudflared installeren en tunnel configureren
+3. DNS records aanmaken in Cloudflare
+4. Reverse proxy configureren
+5. Portal en CI/CD deployen
